@@ -3,26 +3,33 @@
 /* RastPort, 2024                      */
 /*-------------------------------------*/
 
-#include "main.h"
+#include "rptypes.h"
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
 #include <workbench/startup.h>
-
 
 Library *SysBase;
 Library *DOSBase;
+void* TaskPool = NULL;
 
-extern ULONG Main(WBStartup *wbmsg);
+extern int32 Main(WBStartup *wbmsg);
 
+#define HAVE_GLOBAL_CONSTRUCTORS
 
-__saveds ULONG Start(void)
+#ifdef HAVE_GLOBAL_CONSTRUCTORS
+extern void (*__CTOR_LIST__[])(void);
+extern void (*__DTOR_LIST__[])(void);
+void GlobalConstructors();
+void GlobalDestructors();
+#endif
+
+__attribute__((saveds)) int32 Start(void)
 {
 	Process *myproc = NULL;
 	WBStartup *wbmsg = NULL;
 	BOOL have_shell = FALSE;
-	ULONG result = RETURN_OK;
+	int32 result = RETURN_OK;
 
 	SysBase = *(Library**)4L;
 	myproc = (Process*)FindTask(NULL);
@@ -39,7 +46,18 @@ __saveds ULONG Start(void)
 
 	if (DOSBase = OpenLibrary("dos.library", 39))
 	{
-		result = Main(wbmsg);
+		if (TaskPool = CreatePool(MEMF_ANY, 4096, 2048))
+		{
+			#ifdef HAVE_GLOBAL_CONSTRUCTORS
+			GlobalConstructors();
+			#endif
+			result = Main(wbmsg);
+			#ifdef HAVE_GLOBAL_CONSTRUCTORS
+			GlobalDestructors();
+			#endif
+			DeletePool(TaskPool);
+		}
+
 		CloseLibrary(DOSBase);
 	}
 
@@ -49,36 +67,59 @@ __saveds ULONG Start(void)
 		ReplyMsg(&wbmsg->sm_Message);
 	}
 
-	return (ULONG)result;
+	return (int32)result;
 }
 
 
-__attribute__((section(".text"))) UBYTE VString[] = "$VER: QoaPlay " QOAPLAY_VERSION " ("
- QOAPLAY_DATE ")\r\n";
+__attribute__((section(".text"))) UBYTE VString[] = "$VER: QoaPlay 0.3 (23.07.2025)\r\n";
 
 
-APTR operator new(ULONG size) throw()
+
+void* operator new(uint32 size) throw()
 {
-	APTR p = AllocVec(size, MEMF_ANY);
-	D("new(%ld) = $%08lx.\n", size, p);
-	return p;
+	uint32 *m;
+
+	size += 4;
+
+	if (m = (uint32*)AllocPooled(TaskPool, size))
+	{
+		*m = size;
+		return m + 1;
+	}
+	else return NULL;
 }
 
 
-APTR operator new[](ULONG size)
+void* operator new[](uint32 size)
 {
 	return operator new(size);
 }
 
 
-void operator delete(APTR memory)
+void operator delete(void* memory)
 {
-	D("delete($%08lx).\n", memory);
-	FreeVec(memory);
+	uint32 *m = (uint32*)memory - 1;
+
+	FreePooled(TaskPool, m, *m);
 }
 
 
-void operator delete[](APTR memory)
+void operator delete[](void* memory)
 {
 	operator delete(memory);
 }
+
+
+#ifdef HAVE_GLOBAL_CONSTRUCTORS
+void GlobalConstructors()
+{
+	for (long i = (long)__CTOR_LIST__[0]; i > 0; i--) __CTOR_LIST__[i](); 
+}
+
+void GlobalDestructors()
+{
+	void (**dtor)(void) = __DTOR_LIST__;
+
+	while (*(++dtor)) (*dtor)();
+}
+#endif

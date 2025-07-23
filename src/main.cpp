@@ -6,6 +6,7 @@
 #include <dos/rdargs.h>
 #include <exec/execbase.h>
 
+#include "rptypes.h"
 #include "main.h"
 #include "errors.h"
 #include "qoainput.h"
@@ -223,7 +224,7 @@ BOOL App::Play()
 
 /*-------------------------------------------------------------------------------------------*/
 
-LONG Main(WBStartup *wbmsg)
+int32 Main(WBStartup *wbmsg)
 {
 	LONG result = RETURN_ERROR;
 
